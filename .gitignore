@@ -12,3 +12,7 @@ tests/
 *.ipynb
 *.csv
 *.tsv
+*.txt
+*.md
+dataset_*/
+eda*/

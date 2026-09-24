@@ -8,7 +8,30 @@ from src.features import build_features
 
 
 def decide(pk, prob, thr, assign=True):
-    """Each S2/S3 record is assigned to at most one S1 (S1 is deduplicated), then threshold."""
+    """Each S2/S3 record is assigned to at most one S1 (S1 is deduplicated), then threshold.
+    If assign is True, each S2/S3 record is assigned to the S1 with the highest probability.
+    If assign is False, all S2/S3 records are considered for matching.
+    So, to explain in detail with an example:
+    Suppose we have the following pairs with their probabilities:
+    S1_id | S2/S3_id | Probability
+    A     | X        | 0.9
+    A     | Y        | 0.8
+    B     | X        | 0.7
+    If assign is True, we will assign X to A (highest probability) and Y to A. Then we will apply the 
+    threshold, and if the threshold is 0.85, we will keep only the pair (A, X) because it meets the threshold. 
+    The final result will be:
+    {
+        'A': {'X'},
+        'B': set()
+    }
+    If assign is False, we will not assign X to A or B, and we will consider all pairs for matching. 
+    Then we will apply the threshold, and if the threshold is 0.85, we will keep only the pair (A, X) 
+    because it meets the threshold. The final result will be:
+    {
+        'A': {'X'},
+        'B': set()
+    }
+    """
     d = pk[["s1_id", "t_id"]].assign(p=prob)
     if assign:
         d = d.sort_values("p", ascending=False).drop_duplicates("t_id")
@@ -25,6 +48,13 @@ def write_lists(path, s1_ids, d, col):
 
 
 def eda(a):
+    """Exploratory Data Analysis (EDA) on the training dataset.
+    This function loads the training data, reads the ground truth and prints various statistics about the dataset.
+    It calculates the sizes of the datasets, the singleton rate of S1, the number of matches per S1, the number 
+    of targets claimed by more than one S1 and the number of cross-country ground truth pairs. It also checks for 
+    empty addresses and the presence of postal codes in the datasets. Finally, it prints a few examples of S1 
+    records and their corresponding matches in S2 and S3.
+    """
     s1, s2, s3 = load(a.data, "train")
     gt = read_gt(f"{a.data}/train/train_ground_truth.tsv")
     print("sizes", len(s1), len(s2), len(s3), "| countries", s1.country.value_counts().to_dict())
@@ -42,9 +72,24 @@ def eda(a):
         allr = pd.concat([s2, s3]).set_index("entity_id")
         for t in gt[s]:
             print("   ->", t, allr.loc[t, ["business_name", "business_address"]].tolist())
+    # print of adress errors, like Corp and Corporation, Inc and Incorporated, etc.
+    print("\nAddress errors (e.g., Corp vs. Corporation, Inc vs. Incorporated):")
+    for s in list(gt)[:5]:
+        s1_addr = s1.set_index("entity_id").loc[s, "business_address"]
+        allr = pd.concat([s2, s3]).set_index("entity_id")
+        for t in gt[s]:
+            t_addr = allr.loc[t, "business_address"]
+            if s1_addr != t_addr:
+                print(f"   -> S1: {s1_addr} | S2/S3: {t_addr}")
 
 
 def fit(a):
+    """
+    Train a LightGBM model on the training dataset.
+    This function loads the training data, reads the ground truth, builds candidate pairs, extracts features, 
+    and trains a LightGBM model. It evaluates the model on a validation set and saves the trained model and its 
+    parameters to disk.
+    """
     s1, s2, s3 = load(a.data, "train")
     gt = read_gt(f"{a.data}/train/train_ground_truth.tsv")
     truth = {s: gt.get(s, set()) for s in s1.entity_id}
@@ -69,6 +114,12 @@ def fit(a):
 
 
 def predict(a):
+    """
+    Predict matches on the test dataset using a trained LightGBM model.
+    This function loads the test data, loads the trained model, builds candidate pairs, extracts features, and 
+    predicts the probabilities of matches. It then applies a decision threshold to determine the final matches 
+    and writes the results to output files.
+    """
     s1, s2, s3 = load(a.data, "test")
     art = joblib.load(f"{a.art}/model.joblib")
     pairs = build_pairs(s1, s2, s3, a.k)
