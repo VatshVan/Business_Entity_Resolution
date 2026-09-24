@@ -1,0 +1,14 @@
+dataset/
+.venv/
+.DS_Store
+*.pyc
+tests/
+# Local model weights
+*.pt
+*.ckpt
+*.h5
+*.log
+*.ipynb_checkpoints
+*.ipynb
+*.csv
+*.tsv
